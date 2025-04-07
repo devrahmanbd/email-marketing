@@ -240,6 +240,7 @@ std::string getFileViaDialog() {
     char szFile[MAX_PATH] = {0};
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
+    // If you have a window handle, you can set it here. Otherwise, NULL.
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = sizeof(szFile);
@@ -289,11 +290,9 @@ void worker(const Config &config) {
         for (const auto &line : batch) {
             std::string processed = processLine(line, config);
             if (!processed.empty()) {
-                // Check thread-local deduplication first
                 if (localDuplicates.find(processed) != localDuplicates.end())
                     continue;
                 localDuplicates.insert(processed);
-                // Now check and update the global deduplication set (minimize locking frequency)
                 {
                     std::lock_guard<std::mutex> lock(duplicate_mutex);
                     if (global_duplicates.find(processed) != global_duplicates.end())
@@ -330,6 +329,7 @@ void writer(const std::string &outputFilename) {
 
 int main(int argc, char* argv[]) {
     Config config = parseConfig("config.ini");
+
     std::vector<std::string> inputFiles;
     if (argc < 2) {
 #ifdef _WIN32
@@ -348,8 +348,13 @@ int main(int argc, char* argv[]) {
             inputFiles.push_back(arg);
         }
     }
+    
     for (const auto &inputFile : inputFiles) {
         std::cout << "Processing: " << inputFile << std::endl;
+        if (!fs::exists(inputFile) || fs::file_size(inputFile) == 0) {
+            std::cerr << "File does not exist or is empty: " << inputFile << "\n";
+            continue;
+        }
         {
             std::lock_guard<std::mutex> lock(duplicate_mutex);
             global_duplicates.clear();
