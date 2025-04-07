@@ -253,35 +253,40 @@ std::atomic<unsigned long long> processedCount{ 0 };
 #ifdef _WIN32
 std::vector<std::string> getFilesViaDialog() {
     std::vector<std::string> files;
-    OPENFILENAME ofn;
-    char szFile[4096] = {0}; 
+    char filename[MAX_PATH] = {0};
+    char directory[MAX_PATH] = {0};
+
+    OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = NULL;
-    ofn.lpstrFile = szFile;
-    ofn.nMaxFile = sizeof(szFile);
-    ofn.lpstrFilter = "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
-    ofn.lpstrTitle = "Select Input File(s)";
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ALLOWMULTISELECT;
-    if (GetOpenFileName(&ofn)) {
-        std::string allFiles(szFile);
-        std::string directory = allFiles;
-        
-        if (allFiles.find('\0') != std::string::npos) {
-            char* p = szFile;
-            directory = std::string(p);
-            p += directory.size() + 1;
-            while (*p) {
-                std::string filename = p;
-                files.push_back(fs::path(directory) / filename);
-                p += filename.size() + 1;
-            }
+    ofn.lpstrFilter = "Text Files\0*.txt\0All Files\0*.*\0";
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrInitialDir = NULL;
+    ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER;
+    ofn.lpstrTitle = "Select Files";
+
+    std::vector<char> buffer(4096, 0);
+    ofn.lpstrFile = buffer.data();
+    ofn.nMaxFile = buffer.size();
+
+    if (GetOpenFileNameA(&ofn)) {
+        std::string dir = buffer.data();
+        char* ptr = buffer.data() + dir.length() + 1;
+
+        if (*ptr == '\0') {
+            files.push_back(dir);
         } else {
-            files.push_back(allFiles);
+            while (*ptr) {
+                files.push_back((fs::path(dir) / ptr).string());
+                ptr += strlen(ptr) + 1;
+            }
         }
     }
+
     return files;
 }
+
 #endif
 
 std::regex wildcardToRegex(const std::string &pattern) {
