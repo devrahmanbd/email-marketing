@@ -158,13 +158,21 @@ public:
     }
     bool pop(T &item) {
         std::unique_lock<std::mutex> lock(mutex_);
-        while (queue_.empty() && !done_) { cond_.wait(lock); }
-        if (!queue_.empty()) { item = std::move(queue_.front()); queue_.pop(); return true; }
+        while (queue_.empty() && !done_) { 
+            cond_.wait(lock); 
+        }
+        if (!queue_.empty()) { 
+            item = std::move(queue_.front()); 
+            queue_.pop(); 
+            return true; 
+        }
         return false;
     }
     void popBatch(std::vector<T> &batch, size_t maxBatchSize) {
         std::unique_lock<std::mutex> lock(mutex_);
-        while (queue_.empty() && !done_) { cond_.wait(lock); }
+        while (queue_.empty() && !done_) { 
+            cond_.wait(lock); 
+        }
         while (!queue_.empty() && batch.size() < maxBatchSize) {
             batch.push_back(std::move(queue_.front()));
             queue_.pop();
@@ -172,11 +180,14 @@ public:
     }
     void setDone() {
         std::lock_guard<std::mutex> lock(mutex_);
-        done_ = true; cond_.notify_all();
+        done_ = true; 
+        cond_.notify_all();
     }
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
-        while (!queue_.empty()) { queue_.pop(); }
+        while (!queue_.empty()) { 
+            queue_.pop(); 
+        }
         done_ = false;
     }
 private:
@@ -240,7 +251,7 @@ std::string getFileViaDialog() {
     char szFile[MAX_PATH] = {0};
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
-    // If you have a window handle, you can set it here. Otherwise, NULL.
+    // Use NULL if you don't have a parent window
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = sizeof(szFile);
@@ -307,7 +318,10 @@ void worker(const Config &config) {
 
 void producer(const std::string &inputFilename) {
     std::ifstream infile(inputFilename);
-    if (!infile) { std::cerr << "Cannot open input file: " << inputFilename << "\n"; std::exit(1); }
+    if (!infile) { 
+        std::cerr << "Cannot open input file: " << inputFilename << "\n"; 
+        std::exit(1); 
+    }
     std::string line;
     while (std::getline(infile, line)) {
         inputQueue.push(line);
@@ -318,12 +332,14 @@ void producer(const std::string &inputFilename) {
 
 void writer(const std::string &outputFilename) {
     std::ofstream outfile(outputFilename);
-    if (!outfile) { std::cerr << "Cannot open output file: " << outputFilename << "\n"; std::exit(1); }
+    if (!outfile) { 
+        std::cerr << "Cannot open output file: " << outputFilename << "\n"; 
+        std::exit(1); 
+    }
     std::string processed;
-    while (true) {
-        if (outputQueue.pop(processed)) {
-            outfile << processed << "\n";
-        } else if (doneReading.load()) break;
+    // Keep popping until the queue is marked done.
+    while (outputQueue.pop(processed)) {
+         outfile << processed << "\n";
     }
 }
 
@@ -334,16 +350,23 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
 #ifdef _WIN32
         std::string file = getFileViaDialog();
-        if (file.empty()) { std::cerr << "No file selected.\n"; return 1; }
+        if (file.empty()) { 
+            std::cerr << "No file selected.\n"; 
+            return 1; 
+        }
         inputFiles.push_back(file);
 #else
-        std::cerr << "Usage: " << argv[0] << " <input_file_or_wildcard>\n"; return 1;
+        std::cerr << "Usage: " << argv[0] << " <input_file_or_wildcard>\n"; 
+        return 1;
 #endif
     } else {
         std::string arg = argv[1];
         if (arg.find('*') != std::string::npos || arg.find('?') != std::string::npos) {
             inputFiles = getFiles(arg);
-            if (inputFiles.empty()) { std::cerr << "No files matching the wildcard were found.\n"; return 1; }
+            if (inputFiles.empty()) { 
+                std::cerr << "No files matching the wildcard were found.\n"; 
+                return 1; 
+            }
         } else {
             inputFiles.push_back(arg);
         }
