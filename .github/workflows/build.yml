@@ -18,8 +18,8 @@ jobs:
       - name: Build on Linux and macOS
         if: runner.os != 'Windows'
         run: |
-          g++ -std=c++17 -O2 -o filter filter.cpp
-          g++ -std=c++17 -O2 -o ulp ulp.cpp
+          g++ -std=c++17 -o filter filter.cpp
+          g++ -std=c++17 -o ulp ulp.cpp
 
       - name: Install mingw on Windows
         if: runner.os == 'Windows'
@@ -33,8 +33,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          x86_64-w64-mingw32-g++ -std=c++17 -O2 -static -static-libgcc -static-libstdc++ -mwindows -o filter.exe filter.cpp
-          x86_64-w64-mingw32-g++ -std=c++17 -O2 -static -static-libgcc -static-libstdc++ -mwindows -o ulp.exe ulp.cpp
+          x86_64-w64-mingw32-g++ -std=c++17 -static -static-libgcc -static-libstdc++ -o filter.exe filter.cpp
+          x86_64-w64-mingw32-g++ -std=c++17 -static -static-libgcc -static-libstdc++ -o ulp.exe ulp.cpp
 
       - name: Archive binaries (Linux/macOS)
         if: runner.os != 'Windows'
