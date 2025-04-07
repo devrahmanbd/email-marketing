@@ -70,7 +70,10 @@ struct Config {
 Config parseConfig(const std::string &filename) {
     Config config;
     std::ifstream file(filename);
-    if (!file) { std::cerr << "Cannot open config file: " << filename << "\n"; std::exit(1); }
+    if (!file) { 
+        std::cerr << "Cannot open config file: " << filename << "\n"; 
+        std::exit(1); 
+    }
     std::string line;
     while (std::getline(file, line)) {
         line = trim(line);
@@ -245,21 +248,39 @@ ThreadSafeQueue<std::string> inputQueue;
 ThreadSafeQueue<std::string> outputQueue;
 std::atomic<bool> doneReading{ false };
 
+std::atomic<unsigned long long> processedCount{ 0 };
+
 #ifdef _WIN32
-std::string getFileViaDialog() {
+std::vector<std::string> getFilesViaDialog() {
+    std::vector<std::string> files;
     OPENFILENAME ofn;
-    char szFile[MAX_PATH] = {0};
+    char szFile[4096] = {0}; 
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
-    // Use NULL if you don't have a parent window
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = sizeof(szFile);
     ofn.lpstrFilter = "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
-    ofn.lpstrTitle = "Select an Input File";
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    if (GetOpenFileName(&ofn)) return std::string(szFile);
-    return "";
+    ofn.lpstrTitle = "Select Input File(s)";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ALLOWMULTISELECT;
+    if (GetOpenFileName(&ofn)) {
+        std::string allFiles(szFile);
+        std::string directory = allFiles;
+        
+        if (allFiles.find('\0') != std::string::npos) {
+            char* p = szFile;
+            directory = std::string(p);
+            p += directory.size() + 1;
+            while (*p) {
+                std::string filename = p;
+                files.push_back(fs::path(directory) / filename);
+                p += filename.size() + 1;
+            }
+        } else {
+            files.push_back(allFiles);
+        }
+    }
+    return files;
 }
 #endif
 
@@ -283,7 +304,8 @@ std::vector<std::string> getFiles(const std::string &pattern) {
     for (auto& p : fs::recursive_directory_iterator(base)) {
         if (p.is_regular_file()) {
             std::string fname = p.path().filename().string();
-            if (std::regex_match(fname, r)) files.push_back(p.path().string());
+            if (std::regex_match(fname, r))
+                files.push_back(p.path().string());
         }
     }
     return files;
@@ -311,10 +333,12 @@ void worker(const Config &config) {
                     global_duplicates.insert(processed);
                 }
                 outputQueue.push(processed);
+                processedCount++;
             }
         }
     }
 }
+
 
 void producer(const std::string &inputFilename) {
     std::ifstream infile(inputFilename);
@@ -330,6 +354,7 @@ void producer(const std::string &inputFilename) {
     inputQueue.setDone();
 }
 
+
 void writer(const std::string &outputFilename) {
     std::ofstream outfile(outputFilename);
     if (!outfile) { 
@@ -337,47 +362,66 @@ void writer(const std::string &outputFilename) {
         std::exit(1); 
     }
     std::string processed;
-    // Keep popping until the queue is marked done.
     while (outputQueue.pop(processed)) {
          outfile << processed << "\n";
     }
+}
+
+
+void progressMonitor(std::atomic<bool>& doneProgress) {
+    while (!doneProgress.load()) {
+        std::cout << "\rProcessed lines: " << processedCount.load() << std::flush;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    std::cout << "\rProcessed lines: " << processedCount.load() << std::endl;
 }
 
 int main(int argc, char* argv[]) {
     Config config = parseConfig("config.ini");
 
     std::vector<std::string> inputFiles;
+    
     if (argc < 2) {
 #ifdef _WIN32
-        std::string file = getFileViaDialog();
-        if (file.empty()) { 
+        inputFiles = getFilesViaDialog();
+        if (inputFiles.empty()) { 
             std::cerr << "No file selected.\n"; 
             return 1; 
         }
-        inputFiles.push_back(file);
 #else
-        std::cerr << "Usage: " << argv[0] << " <input_file_or_wildcard>\n"; 
+        std::cerr << "Usage: " << argv[0] << " <input_file_or_wildcard> [additional files...]\n"; 
         return 1;
 #endif
     } else {
-        std::string arg = argv[1];
-        if (arg.find('*') != std::string::npos || arg.find('?') != std::string::npos) {
-            inputFiles = getFiles(arg);
-            if (inputFiles.empty()) { 
-                std::cerr << "No files matching the wildcard were found.\n"; 
-                return 1; 
+        for (int i = 1; i < argc; i++) {
+            std::string arg = argv[i];
+            if (arg.find('*') != std::string::npos || arg.find('?') != std::string::npos) {
+                std::vector<std::string> filesFound = getFiles(arg);
+                if (filesFound.empty()) { 
+                    std::cerr << "No files matching wildcard '" << arg << "' were found.\n"; 
+                } else {
+                    inputFiles.insert(inputFiles.end(), filesFound.begin(), filesFound.end());
+                }
+            } else {
+                inputFiles.push_back(arg);
             }
-        } else {
-            inputFiles.push_back(arg);
         }
     }
     
+    if (inputFiles.empty()) {
+        std::cerr << "No valid input files found.\n";
+        return 1;
+    }
+    
+
     for (const auto &inputFile : inputFiles) {
-        std::cout << "Processing: " << inputFile << std::endl;
+        std::cout << "\nProcessing file: " << inputFile << std::endl;
         if (!fs::exists(inputFile) || fs::file_size(inputFile) == 0) {
             std::cerr << "File does not exist or is empty: " << inputFile << "\n";
             continue;
         }
+
+        processedCount = 0;
         {
             std::lock_guard<std::mutex> lock(duplicate_mutex);
             global_duplicates.clear();
@@ -385,19 +429,30 @@ int main(int argc, char* argv[]) {
         inputQueue.clear();
         outputQueue.clear();
         doneReading = false;
+        
+        std::atomic<bool> progressDone{ false };
+        std::thread progressThread(progressMonitor, std::ref(progressDone));
+        
         std::thread prodThread(producer, inputFile);
         unsigned int num_workers = std::thread::hardware_concurrency();
         if (num_workers == 0) num_workers = 4;
         std::vector<std::thread> workers;
         for (unsigned int i = 0; i < num_workers; ++i)
             workers.emplace_back(worker, std::cref(config));
+            
         fs::path inputPath(inputFile);
         std::string outputFile = inputPath.stem().string() + "_filtered.txt";
         std::thread writerThread(writer, outputFile);
+        
         prodThread.join();
         for (auto &w : workers) w.join();
         outputQueue.setDone();
         writerThread.join();
+        
+
+        progressDone = true;
+        progressThread.join();
+        
         std::cout << "Output written to: " << outputFile << "\n";
     }
     return 0;
