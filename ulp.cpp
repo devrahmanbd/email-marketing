@@ -70,10 +70,7 @@ struct Config {
 Config parseConfig(const std::string &filename) {
     Config config;
     std::ifstream file(filename);
-    if (!file) {
-        std::cerr << "Cannot open config file: " << filename << "\n";
-        std::exit(1);
-    }
+    if (!file) { std::cerr << "Cannot open config file: " << filename << "\n"; std::exit(1); }
     std::string line;
     while (std::getline(file, line)) {
         line = trim(line);
@@ -161,20 +158,26 @@ public:
     }
     bool pop(T &item) {
         std::unique_lock<std::mutex> lock(mutex_);
-        while (queue_.empty() && !done_) {
-            cond_.wait(lock);
-        }
-        if (!queue_.empty()) {
-            item = std::move(queue_.front());
-            queue_.pop();
-            return true;
-        }
+        while (queue_.empty() && !done_) { cond_.wait(lock); }
+        if (!queue_.empty()) { item = std::move(queue_.front()); queue_.pop(); return true; }
         return false;
+    }
+    void popBatch(std::vector<T> &batch, size_t maxBatchSize) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        while (queue_.empty() && !done_) { cond_.wait(lock); }
+        while (!queue_.empty() && batch.size() < maxBatchSize) {
+            batch.push_back(std::move(queue_.front()));
+            queue_.pop();
+        }
     }
     void setDone() {
         std::lock_guard<std::mutex> lock(mutex_);
-        done_ = true;
-        cond_.notify_all();
+        done_ = true; cond_.notify_all();
+    }
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        while (!queue_.empty()) { queue_.pop(); }
+        done_ = false;
     }
 private:
     std::queue<T> queue_;
@@ -220,62 +223,16 @@ std::string processLine(const std::string &line, const Config &config) {
         if (!std::regex_search(line, customReg)) return "";
     }
     std::string output_line;
-    if (config.convert_format == "email:pass" && config.format == "url:email:pass") {
+    if (config.convert_format == "email:pass" && config.format == "url:email:pass")
         output_line = login + config.separator + pass;
-    } else {
+    else
         output_line = line;
-    }
-    {
-        std::lock_guard<std::mutex> lock(duplicate_mutex);
-        if (global_duplicates.find(output_line) != global_duplicates.end()) return "";
-        global_duplicates.insert(output_line);
-    }
     return output_line;
 }
 
 ThreadSafeQueue<std::string> inputQueue;
 ThreadSafeQueue<std::string> outputQueue;
 std::atomic<bool> doneReading{ false };
-
-void producer(const std::string &inputFilename) {
-    std::ifstream infile(inputFilename);
-    if (!infile) {
-        std::cerr << "Cannot open input file: " << inputFilename << "\n";
-        std::exit(1);
-    }
-    std::string line;
-    while (std::getline(infile, line)) {
-        inputQueue.push(line);
-    }
-    doneReading = true;
-    inputQueue.setDone();
-}
-
-void worker(const Config &config) {
-    std::string line;
-    while (inputQueue.pop(line)) {
-        std::string processed = processLine(line, config);
-        if (!processed.empty()) {
-            outputQueue.push(processed);
-        }
-    }
-}
-
-void writer(const std::string &outputFilename) {
-    std::ofstream outfile(outputFilename);
-    if (!outfile) {
-        std::cerr << "Cannot open output file: " << outputFilename << "\n";
-        std::exit(1);
-    }
-    std::string processed;
-    while (true) {
-        if (outputQueue.pop(processed)) {
-            outfile << processed << "\n";
-        } else if (doneReading) {
-            break;
-        }
-    }
-}
 
 #ifdef _WIN32
 std::string getFileViaDialog() {
@@ -289,8 +246,7 @@ std::string getFileViaDialog() {
     ofn.lpstrFilter = "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
     ofn.lpstrTitle = "Select an Input File";
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    if (GetOpenFileName(&ofn))
-        return std::string(szFile);
+    if (GetOpenFileName(&ofn)) return std::string(szFile);
     return "";
 }
 #endif
@@ -315,11 +271,61 @@ std::vector<std::string> getFiles(const std::string &pattern) {
     for (auto& p : fs::recursive_directory_iterator(base)) {
         if (p.is_regular_file()) {
             std::string fname = p.path().filename().string();
-            if (std::regex_match(fname, r))
-                files.push_back(p.path().string());
+            if (std::regex_match(fname, r)) files.push_back(p.path().string());
         }
     }
     return files;
+}
+
+constexpr size_t BATCH_SIZE = 100;
+
+void worker(const Config &config) {
+    std::unordered_set<std::string> localDuplicates;
+    std::vector<std::string> batch;
+    while (true) {
+        batch.clear();
+        inputQueue.popBatch(batch, BATCH_SIZE);
+        if (batch.empty() && doneReading.load()) break;
+        for (const auto &line : batch) {
+            std::string processed = processLine(line, config);
+            if (!processed.empty()) {
+                // Check thread-local deduplication first
+                if (localDuplicates.find(processed) != localDuplicates.end())
+                    continue;
+                localDuplicates.insert(processed);
+                // Now check and update the global deduplication set (minimize locking frequency)
+                {
+                    std::lock_guard<std::mutex> lock(duplicate_mutex);
+                    if (global_duplicates.find(processed) != global_duplicates.end())
+                        continue;
+                    global_duplicates.insert(processed);
+                }
+                outputQueue.push(processed);
+            }
+        }
+    }
+}
+
+void producer(const std::string &inputFilename) {
+    std::ifstream infile(inputFilename);
+    if (!infile) { std::cerr << "Cannot open input file: " << inputFilename << "\n"; std::exit(1); }
+    std::string line;
+    while (std::getline(infile, line)) {
+        inputQueue.push(line);
+    }
+    doneReading = true;
+    inputQueue.setDone();
+}
+
+void writer(const std::string &outputFilename) {
+    std::ofstream outfile(outputFilename);
+    if (!outfile) { std::cerr << "Cannot open output file: " << outputFilename << "\n"; std::exit(1); }
+    std::string processed;
+    while (true) {
+        if (outputQueue.pop(processed)) {
+            outfile << processed << "\n";
+        } else if (doneReading.load()) break;
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -331,8 +337,7 @@ int main(int argc, char* argv[]) {
         if (file.empty()) { std::cerr << "No file selected.\n"; return 1; }
         inputFiles.push_back(file);
 #else
-        std::cerr << "Usage: " << argv[0] << " <input_file_or_wildcard>\n";
-        return 1;
+        std::cerr << "Usage: " << argv[0] << " <input_file_or_wildcard>\n"; return 1;
 #endif
     } else {
         std::string arg = argv[1];
@@ -349,6 +354,9 @@ int main(int argc, char* argv[]) {
             std::lock_guard<std::mutex> lock(duplicate_mutex);
             global_duplicates.clear();
         }
+        inputQueue.clear();
+        outputQueue.clear();
+        doneReading = false;
         std::thread prodThread(producer, inputFile);
         unsigned int num_workers = std::thread::hardware_concurrency();
         if (num_workers == 0) num_workers = 4;
@@ -363,9 +371,6 @@ int main(int argc, char* argv[]) {
         outputQueue.setDone();
         writerThread.join();
         std::cout << "Output written to: " << outputFile << "\n";
-        inputQueue = ThreadSafeQueue<std::string>();
-        outputQueue = ThreadSafeQueue<std::string>();
-        doneReading = false;
     }
     return 0;
 }
