@@ -34,7 +34,8 @@ jobs:
         shell: pwsh
         run: |
            x86_64-w64-mingw32-g++ -std=c++17 -static -static-libgcc -static-libstdc++ -o filter.exe filter.cpp
-           x86_64-w64-mingw32-g++ -std=c++17 -static -static-libgcc -static-libstdc++ -o ulp.exe ulp.cpp
+           x86_64-w64-mingw32-g++ -std=c++17 -static -static-libgcc -static-libstdc++ -o filter.exe filter.cpp -lcomdlg32
+
 
       - name: Archive binaries (Linux/macOS)
         if: runner.os != 'Windows'
