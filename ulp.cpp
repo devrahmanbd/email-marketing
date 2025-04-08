@@ -89,10 +89,10 @@ Config parseConfig(const std::string &filename) {
     return config;
 }
 const std::regex advancedEmailRegex(
-    R"((?:[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}|(?:\\[(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)(?:\\.(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)){3})\\])))"
+    R"(([\w\.-]+)@([\w\.-]+\.[a-zA-Z]{2,}))"
 );
 const std::regex advancedUrlRegex(
-    R"((https?://)?((?:[\w-]+\.)+[a-zA-Z]{2,})(?::\d+)?(?:/[^\s\r\n]*)?)"
+    R"((https?://)?(([\w-]+\.)+[a-zA-Z]{2,})(:\d+)?(/[^\s\r\n]*)?)"
 );
 std::string extractEmailDomain(const std::string &email) {
     size_t pos = email.find('@');
