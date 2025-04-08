@@ -1,6 +1,6 @@
 // Code Compile Command
 // g++ -std=c++17 -o filter filter.cpp | For Mac
-// g++ -std=c++17 -o filter_windows.exe filter.cpp | For Windows
+// x86_64-w64-mingw32-g++ -std=c++17 -static -static-libgcc -static-libstdc++ -o filter.exe filter.cpp | For Windows
 
 #include <iostream>
 #include <fstream>
