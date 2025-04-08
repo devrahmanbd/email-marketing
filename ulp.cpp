@@ -92,7 +92,7 @@ const std::regex advancedEmailRegex(
     R"(([\w\.-]+)@([\w\.-]+\.[a-zA-Z]{2,}))"
 );
 const std::regex advancedUrlRegex(
-    R"((https?://)?(([\w-]+\.)+[a-zA-Z]{2,})(:\d+)?(/[^\s\r\n]*)?)"
+    R"((https?://)?((?:[\w-]+\.)+[a-zA-Z]{2,})(:\d+)?(/[^\s\r\n]*)?)"
 );
 std::string extractEmailDomain(const std::string &email) {
     size_t pos = email.find('@');
@@ -219,7 +219,8 @@ std::vector<std::string> getFilesViaDialog() {
     OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "Text Files\\0*.txt\\0All Files\\0*.*\\0";
+    // Updated filter string with descriptive text and pattern.
+    ofn.lpstrFilter = "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrInitialDir = NULL;
